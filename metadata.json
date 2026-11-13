@@ -1,0 +1,6 @@
+{
+  "name": "FitTracker",
+  "description": "Fitness Tracker webapp aesthetic workout tracker with custom sets, reps, weight tracking, live workout stopwatch timer, volume & completion stats, personal records, custom exercise library, and import/export capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
