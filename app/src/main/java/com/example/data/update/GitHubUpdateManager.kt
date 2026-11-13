@@ -32,21 +32,14 @@ sealed class UpdateCheckResult {
 
 object GitHubUpdateManager {
 
-    private const val PREFS_NAME = "app_update_prefs"
-    private const val KEY_GITHUB_REPO = "github_repo"
+    // Fixed GitHub repository ("owner/repo"). Automatically populated from BuildConfig.GITHUB_REPO
+    // during GitHub Actions builds (${{ github.repository }}) or via .env / AI Studio Secrets.
+    private const val FIXED_GITHUB_REPO = ""
 
-    fun getConfiguredRepo(context: Context): String {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = prefs.getString(KEY_GITHUB_REPO, null)?.trim().orEmpty()
-        if (saved.isNotEmpty()) return normalizeRepo(saved)
-        return normalizeRepo(BuildConfig.GITHUB_REPO)
-    }
-
-    fun saveConfiguredRepo(context: Context, rawInput: String): String {
-        val normalized = normalizeRepo(rawInput)
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_GITHUB_REPO, normalized).apply()
-        return normalized
+    fun getConfiguredRepo(): String {
+        val fromBuildConfig = normalizeRepo(BuildConfig.GITHUB_REPO)
+        if (fromBuildConfig.isNotEmpty()) return fromBuildConfig
+        return normalizeRepo(FIXED_GITHUB_REPO)
     }
 
     fun normalizeRepo(rawInput: String): String {

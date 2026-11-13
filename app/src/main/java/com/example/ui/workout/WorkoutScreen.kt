@@ -81,7 +81,6 @@ fun WorkoutScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
-    var showGitHubRepoDialog by remember { mutableStateOf(false) }
     var lastDrawerUpdateCheckMs by remember { mutableLongStateOf(0L) }
 
     val installPermissionLauncher = rememberLauncherForActivityResult(
@@ -91,11 +90,11 @@ fun WorkoutScreen(
     }
 
     LaunchedEffect(drawerState.isOpen) {
-        if (drawerState.isOpen && uiState.githubRepo.isNotBlank() && !uiState.isCheckingUpdate && !uiState.isDownloadingUpdate) {
+        if (drawerState.isOpen && !uiState.isCheckingUpdate && !uiState.isDownloadingUpdate) {
             val now = System.currentTimeMillis()
             if (now - lastDrawerUpdateCheckMs > 30_000L) {
                 lastDrawerUpdateCheckMs = now
-                viewModel.checkForGitHubUpdates(manual = false)
+                viewModel.checkForGitHubUpdates()
             }
         }
     }
@@ -269,7 +268,7 @@ fun WorkoutScreen(
                             }
                         }
 
-                        if (uiState.availableUpdate != null) {
+                        if (uiState.availableUpdate != null && uiState.showSidebarUpdateButton) {
                             Surface(
                                 onClick = {
                                     coroutineScope.launch { drawerState.close() }
@@ -497,12 +496,6 @@ fun WorkoutScreen(
                         color = Color.White,
                         modifier = Modifier
                             .align(Alignment.Start)
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                viewModel.clearUpdateStatusMessage()
-                                showGitHubRepoDialog = true
-                            }
-                            .padding(vertical = 2.dp)
                             .testTag("drawer_app_version_text")
                     )
 
@@ -649,6 +642,82 @@ fun WorkoutScreen(
         )
     }
 
+    // Startup Update Available Popup (Update / Later)
+    val startupUpdate = uiState.availableUpdate
+    if (uiState.showStartupUpdateDialog && startupUpdate != null && !uiState.isDownloadingUpdate) {
+        AlertDialog(
+            onDismissRequest = { viewModel.deferStartupUpdate() },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = "New Version Available",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color(0xFF0F172A)
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "A newer version of FitTracker is available.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF475569)
+                    )
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Installed: Ver ${com.example.BuildConfig.VERSION_NAME}  \u2192  New: Ver ${startupUpdate.latestVersion}",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF0F172A),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        )
+                    }
+                    if (startupUpdate.releaseNotes.isNotBlank()) {
+                        Text(
+                            text = startupUpdate.releaseNotes,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF64748B),
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.startAppUpdate() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("startup_update_confirm_button")
+                ) {
+                    Text("Update", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.deferStartupUpdate() },
+                    modifier = Modifier.testTag("startup_update_later_button")
+                ) {
+                    Text("Later", color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White
+        )
+    }
+
     // Downloading Update Progress Dialog
     if (uiState.isDownloadingUpdate) {
         val progress = uiState.updateDownloadProgress
@@ -728,97 +797,6 @@ fun WorkoutScreen(
             dismissButton = {
                 TextButton(onClick = { viewModel.dismissUpdatePermissionPrompt() }) {
                     Text("Cancel", color = Color(0xFF64748B))
-                }
-            },
-            shape = RoundedCornerShape(16.dp),
-            containerColor = Color.White
-        )
-    }
-
-    // GitHub Repository Configuration & Manual Update Check Dialog (opened by tapping Ver label)
-    if (showGitHubRepoDialog) {
-        var repoInput by remember(uiState.githubRepo) { mutableStateOf(uiState.githubRepo) }
-
-        AlertDialog(
-            onDismissRequest = { showGitHubRepoDialog = false },
-            title = {
-                Text(
-                    text = "GitHub Auto-Update",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF0F172A)
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Current version: Ver ${com.example.BuildConfig.VERSION_NAME}",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = Color(0xFF0F172A)
-                    )
-                    OutlinedTextField(
-                        value = repoInput,
-                        onValueChange = { repoInput = it },
-                        label = { Text("GitHub Repo (owner/repo)") },
-                        placeholder = { Text("username/FitTracker") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("github_repo_input"),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    if (uiState.isCheckingUpdate) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Text(
-                                text = "Checking GitHub...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF64748B)
-                            )
-                        }
-                    } else if (!uiState.updateStatusMessage.isNullOrBlank()) {
-                        Text(
-                            text = uiState.updateStatusMessage!!,
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                            color = if (uiState.availableUpdate != null) Color(0xFF059669) else Color(0xFF475569)
-                        )
-                    }
-                    if (uiState.availableUpdate != null) {
-                        Button(
-                            onClick = {
-                                showGitHubRepoDialog = false
-                                viewModel.startAppUpdate()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Install Ver ${uiState.availableUpdate!!.latestVersion}",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.saveGitHubRepoAndCheck(repoInput) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("save_github_repo_button")
-                ) {
-                    Text("Save & Check", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showGitHubRepoDialog = false }) {
-                    Text("Close", color = Color(0xFF64748B))
                 }
             },
             shape = RoundedCornerShape(16.dp),
