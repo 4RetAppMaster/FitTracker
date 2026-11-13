@@ -1,6 +1,8 @@
 package com.example.ui.workout
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.entity.WorkoutPlan
+import com.example.data.update.GitHubUpdateManager
 import com.example.ui.backup.BackupDialog
 import com.example.ui.components.CreatePlanDialog
 import com.example.ui.components.ExerciseCard
@@ -77,6 +80,25 @@ fun WorkoutScreen(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+
+    var showGitHubRepoDialog by remember { mutableStateOf(false) }
+    var lastDrawerUpdateCheckMs by remember { mutableLongStateOf(0L) }
+
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.onInstallPermissionResult()
+    }
+
+    LaunchedEffect(drawerState.isOpen) {
+        if (drawerState.isOpen && uiState.githubRepo.isNotBlank() && !uiState.isCheckingUpdate && !uiState.isDownloadingUpdate) {
+            val now = System.currentTimeMillis()
+            if (now - lastDrawerUpdateCheckMs > 30_000L) {
+                lastDrawerUpdateCheckMs = now
+                viewModel.checkForGitHubUpdates(manual = false)
+            }
+        }
+    }
 
     val currentScreen = uiState.currentScreen
     val screenStack = uiState.screenStack
@@ -196,51 +218,96 @@ fun WorkoutScreen(
                         .fillMaxSize()
                         .padding(16.dp)
                 ) {
-                    // Header in Drawer - Dumbbell Logo & Title near top
+                    // Header in Drawer - Dumbbell Logo & Title near top + Update Button when available
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 12.dp, bottom = 20.dp, start = 4.dp, end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFFF6B00)),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.FitnessCenter,
-                                contentDescription = "FitTracker Logo",
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFFF6B00)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FitnessCenter,
+                                    contentDescription = "FitTracker Logo",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "FitTracker",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 0.5.sp,
+                                        fontSize = 22.sp
+                                    ),
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = ".",
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 0.5.sp,
+                                        fontSize = 22.sp
+                                    ),
+                                    color = Color(0xFFFF6B00)
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "FitTracker",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 0.5.sp,
-                                    fontSize = 22.sp
-                                ),
-                                color = Color.White
-                            )
-                            Text(
-                                text = ".",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 0.5.sp,
-                                    fontSize = 22.sp
-                                ),
-                                color = Color(0xFFFF6B00)
-                            )
+
+                        if (uiState.availableUpdate != null) {
+                            Surface(
+                                onClick = {
+                                    coroutineScope.launch { drawerState.close() }
+                                    viewModel.startAppUpdate()
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF10B981),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .testTag("drawer_update_app_button")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdate,
+                                        contentDescription = "Update App",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Update",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        ),
+                                        color = Color.White,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
                         }
                     }
 
-                    Divider(color = SidebarDarkBlueOutline, thickness = 1.dp)
+                    HorizontalDivider(color = SidebarDarkBlueOutline, thickness = 1.dp)
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // 1st menupoint: Workouts
@@ -427,6 +494,12 @@ fun WorkoutScreen(
                         color = Color.White,
                         modifier = Modifier
                             .align(Alignment.Start)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                viewModel.clearUpdateStatusMessage()
+                                showGitHubRepoDialog = true
+                            }
+                            .padding(vertical = 2.dp)
                             .testTag("drawer_app_version_text")
                     )
 
@@ -570,6 +643,183 @@ fun WorkoutScreen(
             onCreatePlan = { name, desc ->
                 viewModel.createNewPlan(name, desc)
             }
+        )
+    }
+
+    // Downloading Update Progress Dialog
+    if (uiState.isDownloadingUpdate) {
+        val progress = uiState.updateDownloadProgress
+        AlertDialog(
+            onDismissRequest = {},
+            title = {
+                Text(
+                    text = "Updating to Ver ${uiState.availableUpdate?.latestVersion ?: ""}",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Downloading update from GitHub...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF475569)
+                    )
+                    if (progress != null) {
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF10B981),
+                            trackColor = Color(0xFFE2E8F0)
+                        )
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF0F172A)
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF10B981),
+                            trackColor = Color(0xFFE2E8F0)
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White
+        )
+    }
+
+    // Install Unknown Apps Permission Prompt
+    if (uiState.needsInstallPermissionForUpdate) {
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissUpdatePermissionPrompt() },
+            title = {
+                Text(
+                    text = "Allow App Update Install",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Text(
+                    text = "Android needs permission for FitTracker to install the downloaded update APK. Tap Allow to open settings, enable \"Allow from this source\", then return.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        installPermissionLauncher.launch(GitHubUpdateManager.createUnknownSourcesIntent(context))
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("allow_install_permission_button")
+                ) {
+                    Text("Allow & Install", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissUpdatePermissionPrompt() }) {
+                    Text("Cancel", color = Color(0xFF64748B))
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White
+        )
+    }
+
+    // GitHub Repository Configuration & Manual Update Check Dialog (opened by tapping Ver label)
+    if (showGitHubRepoDialog) {
+        var repoInput by remember(uiState.githubRepo) { mutableStateOf(uiState.githubRepo) }
+
+        AlertDialog(
+            onDismissRequest = { showGitHubRepoDialog = false },
+            title = {
+                Text(
+                    text = "GitHub Auto-Update",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Current version: Ver ${com.example.BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = Color(0xFF0F172A)
+                    )
+                    OutlinedTextField(
+                        value = repoInput,
+                        onValueChange = { repoInput = it },
+                        label = { Text("GitHub Repo (owner/repo)") },
+                        placeholder = { Text("username/FitTracker") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("github_repo_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    if (uiState.isCheckingUpdate) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = "Checking GitHub...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    } else if (!uiState.updateStatusMessage.isNullOrBlank()) {
+                        Text(
+                            text = uiState.updateStatusMessage!!,
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                            color = if (uiState.availableUpdate != null) Color(0xFF059669) else Color(0xFF475569)
+                        )
+                    }
+                    if (uiState.availableUpdate != null) {
+                        Button(
+                            onClick = {
+                                showGitHubRepoDialog = false
+                                viewModel.startAppUpdate()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Install Ver ${uiState.availableUpdate!!.latestVersion}",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.saveGitHubRepoAndCheck(repoInput) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.testTag("save_github_repo_button")
+                ) {
+                    Text("Save & Check", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGitHubRepoDialog = false }) {
+                    Text("Close", color = Color(0xFF64748B))
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White
         )
     }
 }

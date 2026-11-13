@@ -1,0 +1,71 @@
+name: Build and Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+
+      - name: Prepare keystore and env
+        run: |
+          if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+          if [ -n "${{ github.repository }}" ]; then
+            if grep -q '^GITHUB_REPO=' .env 2>/dev/null; then
+              sed -i 's|^GITHUB_REPO=.*|GITHUB_REPO="${{ github.repository }}"|' .env
+            else
+              echo 'GITHUB_REPO="${{ github.repository }}"' >> .env
+            fi
+          fi
+
+      - name: Extract versionName
+        id: version
+        run: |
+          VERSION=$(grep -E 'versionName\s*=' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/' | head -n 1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected versionName: $VERSION"
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Package named APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "FitTracker-v${{ steps.version.outputs.version }}.apk"
+
+      - name: Publish GitHub Release
+        if: steps.version.outputs.version != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          name: "FitTracker v${{ steps.version.outputs.version }}"
+          body: "Automated APK build for FitTracker Ver ${{ steps.version.outputs.version }}"
+          files: "FitTracker-v${{ steps.version.outputs.version }}.apk"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

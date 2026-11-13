@@ -12,6 +12,9 @@ import com.example.data.entity.WorkoutSetLog
 import com.example.data.repository.ExerciseStats
 import com.example.data.repository.ExerciseWorkoutHistoryItem
 import com.example.data.repository.WorkoutRepository
+import com.example.data.update.GitHubUpdateInfo
+import com.example.data.update.GitHubUpdateManager
+import com.example.data.update.UpdateCheckResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -102,7 +105,15 @@ data class WorkoutUiState(
     val isImporting: Boolean = false,
     val selectedExerciseForStats: Exercise? = null,
     val exerciseHistory: List<ExerciseWorkoutHistoryItem> = emptyList(),
-    val loadedPlanId: Long? = null
+    val loadedPlanId: Long? = null,
+    val githubRepo: String = "",
+    val availableUpdate: GitHubUpdateInfo? = null,
+    val isCheckingUpdate: Boolean = false,
+    val isDownloadingUpdate: Boolean = false,
+    val updateDownloadProgress: Float? = null,
+    val pendingUpdateApkPath: String? = null,
+    val needsInstallPermissionForUpdate: Boolean = false,
+    val updateStatusMessage: String? = null
 )
 
 class WorkoutViewModel(application: Application) : AndroidViewModel(application) {
@@ -204,6 +215,12 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
                 repository.seedSampleTestDataIfEmpty()
             }
             repository.pruneAllExercisesHistoryToLast10()
+
+            val configuredRepo = GitHubUpdateManager.getConfiguredRepo(getApplication())
+            _uiState.update { it.copy(githubRepo = configuredRepo) }
+            if (configuredRepo.isNotBlank()) {
+                checkForGitHubUpdatesInternal(repo = configuredRepo, manual = false)
+            }
         }
         observeAllPlans()
         observeAllExercises()
@@ -1673,6 +1690,170 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
+    }
+
+    // --- GitHub App Self-Updater ---
+    fun checkForGitHubUpdates(manual: Boolean = false) {
+        val repo = _uiState.value.githubRepo.ifBlank {
+            GitHubUpdateManager.getConfiguredRepo(getApplication())
+        }
+        if (repo.isBlank()) {
+            if (manual) {
+                _uiState.update {
+                    it.copy(updateStatusMessage = "Enter a GitHub repository (e.g. owner/repo) first.")
+                }
+            }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            checkForGitHubUpdatesInternal(repo = repo, manual = manual)
+        }
+    }
+
+    fun saveGitHubRepoAndCheck(repoInput: String) {
+        val normalized = GitHubUpdateManager.saveConfiguredRepo(getApplication(), repoInput)
+        _uiState.update {
+            it.copy(
+                githubRepo = normalized,
+                availableUpdate = null,
+                updateStatusMessage = if (normalized.isBlank()) "Invalid repository format. Use owner/repo." else null
+            )
+        }
+        if (normalized.isNotBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                checkForGitHubUpdatesInternal(repo = normalized, manual = true)
+            }
+        }
+    }
+
+    private suspend fun checkForGitHubUpdatesInternal(repo: String, manual: Boolean) {
+        _uiState.update {
+            it.copy(
+                isCheckingUpdate = true,
+                updateStatusMessage = if (manual) "Checking GitHub for updates..." else it.updateStatusMessage
+            )
+        }
+        when (val result = GitHubUpdateManager.checkForUpdate(repo)) {
+            is UpdateCheckResult.UpdateAvailable -> {
+                _uiState.update {
+                    it.copy(
+                        isCheckingUpdate = false,
+                        availableUpdate = result.info,
+                        updateStatusMessage = if (manual) "New version available: Ver ${result.info.latestVersion}" else null
+                    )
+                }
+            }
+            is UpdateCheckResult.UpToDate -> {
+                _uiState.update {
+                    it.copy(
+                        isCheckingUpdate = false,
+                        availableUpdate = null,
+                        updateStatusMessage = if (manual) "You are on the latest version (Ver ${com.example.BuildConfig.VERSION_NAME})." else null
+                    )
+                }
+            }
+            is UpdateCheckResult.Error -> {
+                _uiState.update {
+                    it.copy(
+                        isCheckingUpdate = false,
+                        updateStatusMessage = if (manual) "Check failed: ${result.message}" else null
+                    )
+                }
+            }
+        }
+    }
+
+    fun startAppUpdate() {
+        val updateInfo = _uiState.value.availableUpdate ?: return
+        if (_uiState.value.isDownloadingUpdate) return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isDownloadingUpdate = true,
+                    updateDownloadProgress = 0f,
+                    pendingUpdateApkPath = null,
+                    needsInstallPermissionForUpdate = false
+                )
+            }
+
+            val result = GitHubUpdateManager.downloadApk(
+                context = getApplication(),
+                downloadUrl = updateInfo.apkDownloadUrl,
+                onProgress = { progress ->
+                    _uiState.update { it.copy(updateDownloadProgress = progress) }
+                }
+            )
+
+            result.onSuccess { apkFile ->
+                val appCtx = getApplication<Application>()
+                if (GitHubUpdateManager.canInstallPackages(appCtx)) {
+                    _uiState.update {
+                        it.copy(
+                            isDownloadingUpdate = false,
+                            updateDownloadProgress = null,
+                            pendingUpdateApkPath = apkFile.absolutePath,
+                            needsInstallPermissionForUpdate = false
+                        )
+                    }
+                    val launchRes = GitHubUpdateManager.launchApkInstaller(appCtx, apkFile)
+                    launchRes.onFailure { err ->
+                        _uiState.update {
+                            it.copy(userNotification = "Could not start installer: ${err.localizedMessage}")
+                        }
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isDownloadingUpdate = false,
+                            updateDownloadProgress = null,
+                            pendingUpdateApkPath = apkFile.absolutePath,
+                            needsInstallPermissionForUpdate = true
+                        )
+                    }
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isDownloadingUpdate = false,
+                        updateDownloadProgress = null,
+                        userNotification = "Update download failed: ${err.localizedMessage ?: "Network error"}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun onInstallPermissionResult() {
+        val appCtx = getApplication<Application>()
+        val path = _uiState.value.pendingUpdateApkPath
+        if (GitHubUpdateManager.canInstallPackages(appCtx) && !path.isNullOrBlank()) {
+            val file = java.io.File(path)
+            if (file.exists()) {
+                _uiState.update { it.copy(needsInstallPermissionForUpdate = false) }
+                val res = GitHubUpdateManager.launchApkInstaller(appCtx, file)
+                res.onFailure { err ->
+                    _uiState.update {
+                        it.copy(userNotification = "Could not launch installer: ${err.localizedMessage}")
+                    }
+                }
+                return
+            }
+        }
+        _uiState.update {
+            it.copy(
+                needsInstallPermissionForUpdate = false,
+                userNotification = "Install permission is required to apply the update."
+            )
+        }
+    }
+
+    fun dismissUpdatePermissionPrompt() {
+        _uiState.update { it.copy(needsInstallPermissionForUpdate = false) }
+    }
+
+    fun clearUpdateStatusMessage() {
+        _uiState.update { it.copy(updateStatusMessage = null) }
     }
 }
 
