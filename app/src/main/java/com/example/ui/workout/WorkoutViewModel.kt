@@ -15,6 +15,7 @@ import com.example.data.repository.WorkoutRepository
 import com.example.data.update.GitHubUpdateInfo
 import com.example.data.update.GitHubUpdateManager
 import com.example.data.update.UpdateCheckResult
+import com.example.data.update.VersionChecker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -108,6 +109,8 @@ data class WorkoutUiState(
     val loadedPlanId: Long? = null,
     val availableUpdate: GitHubUpdateInfo? = null,
     val showStartupUpdateDialog: Boolean = false,
+    val showManualUpdateCheckDialog: Boolean = false,
+    val manualUpdateCheckResultMessage: String? = null,
     val showSidebarUpdateButton: Boolean = false,
     val isCheckingUpdate: Boolean = false,
     val isDownloadingUpdate: Boolean = false,
@@ -133,6 +136,16 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
     private var startupPopupShownForSession = false
 
     init {
+        viewModelScope.launch(Dispatchers.IO) {
+            val configuredRepo = VersionChecker.getConfiguredRepo()
+            if (configuredRepo.isNotBlank()) {
+                checkForGitHubUpdatesInternal(
+                    repo = configuredRepo,
+                    isStartupCheck = true,
+                    isManualCheck = false
+                )
+            }
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val prefs = getApplication<Application>().getSharedPreferences("fit_tracker_prefs", android.content.Context.MODE_PRIVATE)
             val savedLastOpenedId = prefs.getLong("last_opened_plan_id", -1L)
@@ -216,14 +229,6 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
                 repository.seedSampleTestDataIfEmpty()
             }
             repository.pruneAllExercisesHistoryToLast10()
-
-            val configuredRepo = GitHubUpdateManager.getConfiguredRepo()
-            if (configuredRepo.isNotBlank()) {
-                checkForGitHubUpdatesInternal(
-                    repo = configuredRepo,
-                    isStartupCheck = true
-                )
-            }
         }
         observeAllPlans()
         observeAllExercises()
@@ -1697,10 +1702,44 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
     // --- GitHub App Self-Updater ---
     fun checkForGitHubUpdates() {
-        val repo = GitHubUpdateManager.getConfiguredRepo()
+        val repo = VersionChecker.getConfiguredRepo()
         if (repo.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
-            checkForGitHubUpdatesInternal(repo = repo, isStartupCheck = false)
+            checkForGitHubUpdatesInternal(repo = repo, isStartupCheck = false, isManualCheck = false)
+        }
+    }
+
+    fun checkForUpdatesFromVersionTap() {
+        val repo = VersionChecker.getConfiguredRepo()
+        if (repo.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    showManualUpdateCheckDialog = true,
+                    isCheckingUpdate = false,
+                    manualUpdateCheckResultMessage = "This build is not linked to a GitHub repository yet."
+                )
+            }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                showManualUpdateCheckDialog = true,
+                isCheckingUpdate = true,
+                manualUpdateCheckResultMessage = null
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            checkForGitHubUpdatesInternal(repo = repo, isStartupCheck = false, isManualCheck = true)
+        }
+    }
+
+    fun dismissManualUpdateCheckDialog(deferUpdate: Boolean = false) {
+        _uiState.update {
+            it.copy(
+                showManualUpdateCheckDialog = false,
+                manualUpdateCheckResultMessage = null,
+                showSidebarUpdateButton = if (deferUpdate && it.availableUpdate != null) true else it.showSidebarUpdateButton
+            )
         }
     }
 
@@ -1715,37 +1754,55 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun checkForGitHubUpdatesInternal(
         repo: String,
-        isStartupCheck: Boolean = false
+        isStartupCheck: Boolean = false,
+        isManualCheck: Boolean = false
     ) {
         _uiState.update { it.copy(isCheckingUpdate = true) }
-        when (val result = GitHubUpdateManager.checkForUpdate(repo)) {
+        when (val result = VersionChecker.checkForUpdate(repo)) {
             is UpdateCheckResult.UpdateAvailable -> {
-                val shouldShowPopup = isStartupCheck && !startupPopupShownForSession
-                if (shouldShowPopup) {
+                val shouldShowStartupPopup = isStartupCheck && !startupPopupShownForSession
+                if (shouldShowStartupPopup) {
                     startupPopupShownForSession = true
                 }
                 _uiState.update { current ->
                     current.copy(
                         isCheckingUpdate = false,
                         availableUpdate = result.info,
-                        showStartupUpdateDialog = if (shouldShowPopup) true else current.showStartupUpdateDialog,
-                        showSidebarUpdateButton = if (shouldShowPopup) false else true
+                        showStartupUpdateDialog = if (shouldShowStartupPopup) true else current.showStartupUpdateDialog,
+                        showSidebarUpdateButton = if (shouldShowStartupPopup) false else true,
+                        manualUpdateCheckResultMessage = if (isManualCheck) {
+                            "New version Ver ${result.info.latestVersion} is available! Do you want to update?"
+                        } else {
+                            current.manualUpdateCheckResultMessage
+                        }
                     )
                 }
             }
             is UpdateCheckResult.UpToDate -> {
-                _uiState.update {
-                    it.copy(
+                _uiState.update { current ->
+                    current.copy(
                         isCheckingUpdate = false,
                         availableUpdate = null,
                         showStartupUpdateDialog = false,
-                        showSidebarUpdateButton = false
+                        showSidebarUpdateButton = false,
+                        manualUpdateCheckResultMessage = if (isManualCheck) {
+                            "No updates available. You are on the latest version (Ver ${com.example.BuildConfig.VERSION_NAME})."
+                        } else {
+                            current.manualUpdateCheckResultMessage
+                        }
                     )
                 }
             }
             is UpdateCheckResult.Error -> {
-                _uiState.update {
-                    it.copy(isCheckingUpdate = false)
+                _uiState.update { current ->
+                    current.copy(
+                        isCheckingUpdate = false,
+                        manualUpdateCheckResultMessage = if (isManualCheck) {
+                            "Could not check for updates: ${result.message}"
+                        } else {
+                            current.manualUpdateCheckResultMessage
+                        }
+                    )
                 }
             }
         }
@@ -1755,10 +1812,36 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
         val updateInfo = _uiState.value.availableUpdate ?: return
         if (_uiState.value.isDownloadingUpdate) return
 
+        val downloadUrl = updateInfo.apkDownloadUrl
+        if (downloadUrl.isNullOrBlank()) {
+            val pageUrl = updateInfo.releaseHtmlUrl
+            _uiState.update {
+                it.copy(
+                    showStartupUpdateDialog = false,
+                    showManualUpdateCheckDialog = false,
+                    showSidebarUpdateButton = true
+                )
+            }
+            if (!pageUrl.isNullOrBlank()) {
+                val res = GitHubUpdateManager.openReleasePage(getApplication(), pageUrl)
+                res.onFailure { err ->
+                    _uiState.update {
+                        it.copy(userNotification = "Could not open release page: ${err.localizedMessage}")
+                    }
+                }
+            } else {
+                _uiState.update {
+                    it.copy(userNotification = "Update found (Ver ${updateInfo.latestVersion}), but no APK file is attached yet.")
+                }
+            }
+            return
+        }
+
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     showStartupUpdateDialog = false,
+                    showManualUpdateCheckDialog = false,
                     showSidebarUpdateButton = true,
                     isDownloadingUpdate = true,
                     updateDownloadProgress = 0f,
@@ -1769,7 +1852,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
             val result = GitHubUpdateManager.downloadApk(
                 context = getApplication(),
-                downloadUrl = updateInfo.apkDownloadUrl,
+                downloadUrl = downloadUrl,
                 onProgress = { progress ->
                     _uiState.update { it.copy(updateDownloadProgress = progress) }
                 }

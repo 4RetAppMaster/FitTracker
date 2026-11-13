@@ -485,7 +485,7 @@ fun WorkoutScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // App version text left aligned without background, matching sidebar button text
+                    // App version text left aligned without background, matching sidebar button text; tap to check for updates
                     Text(
                         text = "Ver ${com.example.BuildConfig.VERSION_NAME}",
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -496,6 +496,12 @@ fun WorkoutScreen(
                         color = Color.White,
                         modifier = Modifier
                             .align(Alignment.Start)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                coroutineScope.launch { drawerState.close() }
+                                viewModel.checkForUpdatesFromVersionTap()
+                            }
+                            .padding(vertical = 4.dp)
                             .testTag("drawer_app_version_text")
                     )
 
@@ -644,7 +650,7 @@ fun WorkoutScreen(
 
     // Startup Update Available Popup (Update / Later)
     val startupUpdate = uiState.availableUpdate
-    if (uiState.showStartupUpdateDialog && startupUpdate != null && !uiState.isDownloadingUpdate) {
+    if (uiState.showStartupUpdateDialog && startupUpdate != null && !uiState.isDownloadingUpdate && !uiState.showManualUpdateCheckDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.deferStartupUpdate() },
             title = {
@@ -711,6 +717,121 @@ fun WorkoutScreen(
                     modifier = Modifier.testTag("startup_update_later_button")
                 ) {
                     Text("Later", color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+                }
+            },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White
+        )
+    }
+
+    // Manual Update Check Dialog (triggered by tapping Ver X.Y in sidebar)
+    if (uiState.showManualUpdateCheckDialog && !uiState.isDownloadingUpdate) {
+        val foundUpdate = uiState.availableUpdate
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.dismissManualUpdateCheckDialog(deferUpdate = foundUpdate != null)
+            },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = if (foundUpdate != null) Color(0xFF10B981) else Color(0xFFFF6B00),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Text(
+                        text = when {
+                            uiState.isCheckingUpdate -> "Checking for Updates"
+                            foundUpdate != null -> "Update Found"
+                            else -> "Version Check"
+                        },
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color(0xFF0F172A)
+                    )
+                }
+            },
+            text = {
+                if (uiState.isCheckingUpdate) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.5.dp,
+                            color = Color(0xFFFF6B00)
+                        )
+                        Text(
+                            text = "Checking GitHub for updates...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF475569)
+                        )
+                    }
+                } else if (foundUpdate != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Found a newer version. Do you want to update?",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF475569)
+                        )
+                        Surface(
+                            color = Color(0xFFF1F5F9),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Installed: Ver ${com.example.BuildConfig.VERSION_NAME}  \u2192  New: Ver ${foundUpdate.latestVersion}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        text = uiState.manualUpdateCheckResultMessage
+                            ?: "No updates available. You are on Ver ${com.example.BuildConfig.VERSION_NAME}.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF475569)
+                    )
+                }
+            },
+            confirmButton = {
+                when {
+                    uiState.isCheckingUpdate -> {}
+                    foundUpdate != null -> {
+                        Button(
+                            onClick = { viewModel.startAppUpdate() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("manual_update_confirm_button")
+                        ) {
+                            Text("Update", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    else -> {
+                        Button(
+                            onClick = { viewModel.dismissManualUpdateCheckDialog() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("manual_update_ok_button")
+                        ) {
+                            Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                if (!uiState.isCheckingUpdate && foundUpdate != null) {
+                    TextButton(
+                        onClick = { viewModel.dismissManualUpdateCheckDialog(deferUpdate = true) },
+                        modifier = Modifier.testTag("manual_update_later_button")
+                    ) {
+                        Text("Later", color = Color(0xFF64748B), fontWeight = FontWeight.SemiBold)
+                    }
                 }
             },
             shape = RoundedCornerShape(16.dp),
