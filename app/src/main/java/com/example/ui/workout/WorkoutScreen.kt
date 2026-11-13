@@ -323,7 +323,8 @@ fun WorkoutScreen(
                         label = {
                             Text(
                                 "Workouts",
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
                                 color = if (currentScreen == AppScreen.WORKOUTS || currentScreen == AppScreen.ACTIVE_WORKOUT) Color.White else Color(0xFFE2E8F0)
                             )
                         },
@@ -372,7 +373,8 @@ fun WorkoutScreen(
                         label = {
                             Text(
                                 "Exercises",
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
                                 color = if (currentScreen == AppScreen.EXERCISES) Color.White else Color(0xFFE2E8F0)
                             )
                         },
@@ -421,7 +423,8 @@ fun WorkoutScreen(
                         label = {
                             Text(
                                 "Lockers",
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp,
                                 color = if (currentScreen == AppScreen.LOCKERS) Color.White else Color(0xFFE2E8F0)
                             )
                         },
