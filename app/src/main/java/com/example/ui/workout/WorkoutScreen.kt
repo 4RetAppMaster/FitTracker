@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.entity.WorkoutPlan
-import com.example.data.update.GitHubUpdateManager
+import com.example.data.update.Updater
 import com.example.ui.backup.BackupDialog
 import com.example.ui.components.CreatePlanDialog
 import com.example.ui.components.ExerciseCard
@@ -906,7 +906,7 @@ fun WorkoutScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        installPermissionLauncher.launch(GitHubUpdateManager.createUnknownSourcesIntent(context))
+                        installPermissionLauncher.launch(Updater.createUnknownSourcesIntent(context))
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
                     shape = RoundedCornerShape(10.dp),

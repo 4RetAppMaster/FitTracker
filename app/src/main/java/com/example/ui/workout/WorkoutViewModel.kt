@@ -13,9 +13,8 @@ import com.example.data.repository.ExerciseStats
 import com.example.data.repository.ExerciseWorkoutHistoryItem
 import com.example.data.repository.WorkoutRepository
 import com.example.data.update.GitHubUpdateInfo
-import com.example.data.update.GitHubUpdateManager
 import com.example.data.update.UpdateCheckResult
-import com.example.data.update.VersionChecker
+import com.example.data.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -137,7 +136,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            val configuredRepo = VersionChecker.getConfiguredRepo()
+            val configuredRepo = Updater.getConfiguredRepo()
             if (configuredRepo.isNotBlank()) {
                 checkForGitHubUpdatesInternal(
                     repo = configuredRepo,
@@ -1702,7 +1701,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
     // --- GitHub App Self-Updater ---
     fun checkForGitHubUpdates() {
-        val repo = VersionChecker.getConfiguredRepo()
+        val repo = Updater.getConfiguredRepo()
         if (repo.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
             checkForGitHubUpdatesInternal(repo = repo, isStartupCheck = false, isManualCheck = false)
@@ -1710,7 +1709,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun checkForUpdatesFromVersionTap() {
-        val repo = VersionChecker.getConfiguredRepo()
+        val repo = Updater.getConfiguredRepo()
         if (repo.isBlank()) {
             _uiState.update {
                 it.copy(
@@ -1758,7 +1757,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
         isManualCheck: Boolean = false
     ) {
         _uiState.update { it.copy(isCheckingUpdate = true) }
-        when (val result = VersionChecker.checkForUpdate(repo)) {
+        when (val result = Updater.checkForUpdate(repo)) {
             is UpdateCheckResult.UpdateAvailable -> {
                 val shouldShowStartupPopup = isStartupCheck && !startupPopupShownForSession
                 if (shouldShowStartupPopup) {
@@ -1823,7 +1822,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
             if (!pageUrl.isNullOrBlank()) {
-                val res = GitHubUpdateManager.openReleasePage(getApplication(), pageUrl)
+                val res = Updater.openReleasePage(getApplication(), pageUrl)
                 res.onFailure { err ->
                     _uiState.update {
                         it.copy(userNotification = "Could not open release page: ${err.localizedMessage}")
@@ -1850,7 +1849,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
 
-            val result = GitHubUpdateManager.downloadApk(
+            val result = Updater.downloadApk(
                 context = getApplication(),
                 downloadUrl = downloadUrl,
                 onProgress = { progress ->
@@ -1860,7 +1859,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
 
             result.onSuccess { apkFile ->
                 val appCtx = getApplication<Application>()
-                if (GitHubUpdateManager.canInstallPackages(appCtx)) {
+                if (Updater.canInstallPackages(appCtx)) {
                     _uiState.update {
                         it.copy(
                             isDownloadingUpdate = false,
@@ -1869,7 +1868,7 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
                             needsInstallPermissionForUpdate = false
                         )
                     }
-                    val launchRes = GitHubUpdateManager.launchApkInstaller(appCtx, apkFile)
+                    val launchRes = Updater.launchApkInstaller(appCtx, apkFile)
                     launchRes.onFailure { err ->
                         _uiState.update {
                             it.copy(userNotification = "Could not start installer: ${err.localizedMessage}")
@@ -1900,11 +1899,11 @@ class WorkoutViewModel(application: Application) : AndroidViewModel(application)
     fun onInstallPermissionResult() {
         val appCtx = getApplication<Application>()
         val path = _uiState.value.pendingUpdateApkPath
-        if (GitHubUpdateManager.canInstallPackages(appCtx) && !path.isNullOrBlank()) {
+        if (Updater.canInstallPackages(appCtx) && !path.isNullOrBlank()) {
             val file = java.io.File(path)
             if (file.exists()) {
                 _uiState.update { it.copy(needsInstallPermissionForUpdate = false) }
-                val res = GitHubUpdateManager.launchApkInstaller(appCtx, file)
+                val res = Updater.launchApkInstaller(appCtx, file)
                 res.onFailure { err ->
                     _uiState.update {
                         it.copy(userNotification = "Could not launch installer: ${err.localizedMessage}")

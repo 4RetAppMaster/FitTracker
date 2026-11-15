@@ -17,8 +17,8 @@ android {
     applicationId = "com.aistudio.workouttracker.trkfqt"
     minSdk = 24
     targetSdk = 36
-    versionCode = 19
-    versionName = "2.6"
+    versionCode = 22
+    versionName = "2.9"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
