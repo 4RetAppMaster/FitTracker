@@ -40,7 +40,6 @@ sealed class UpdateCheckResult {
 object Updater {
 
     const val DEFAULT_GITHUB_REPO = "4RetAppMaster/FitTracker"
-    private const val ALT_GITHUB_REPO = "4RetAppMaster/FitTracker."
 
     fun getConfiguredRepo(): String {
         val fromBuildConfig = normalizeRepo(BuildConfig.GITHUB_REPO)
@@ -107,33 +106,32 @@ object Updater {
         repoInput: String = getConfiguredRepo(),
         currentVersion: String = BuildConfig.VERSION_NAME
     ): UpdateCheckResult = withContext(Dispatchers.IO) {
-        val primaryRepo = normalizeRepo(repoInput)
-        if (primaryRepo.isEmpty()) {
+        val repo = normalizeRepo(repoInput)
+        if (repo.isEmpty()) {
             return@withContext UpdateCheckResult.Error(
                 message = "Update repository is not linked in this build.",
                 isUnconfigured = true
             )
         }
 
-        val candidates = buildList {
-            add(primaryRepo)
-            if (primaryRepo == DEFAULT_GITHUB_REPO) {
-                add(ALT_GITHUB_REPO)
-            } else if (primaryRepo == ALT_GITHUB_REPO) {
-                add(DEFAULT_GITHUB_REPO)
+        val result = checkSingleRepoForUpdate(repo, currentVersion)
+        if (result is UpdateCheckResult.Error && result.message.contains("404")) {
+            val owner = repo.substringBefore("/")
+            if (checkUserExists(owner)) {
+                return@withContext UpdateCheckResult.Error(
+                    "GitHub returned HTTP 404. Make sure the repository is set to Public on GitHub."
+                )
             }
         }
+        return@withContext result
+    }
 
-        var lastError: UpdateCheckResult.Error? = null
-        for (repo in candidates) {
-            val result = checkSingleRepoForUpdate(repo, currentVersion)
-            when (result) {
-                is UpdateCheckResult.UpdateAvailable,
-                is UpdateCheckResult.UpToDate -> return@withContext result
-                is UpdateCheckResult.Error -> lastError = result
-            }
+    private fun checkUserExists(owner: String): Boolean {
+        return try {
+            httpGetJson("https://api.github.com/users/$owner").statusCode == 200
+        } catch (_: Exception) {
+            false
         }
-        return@withContext lastError ?: UpdateCheckResult.Error("Failed to check for updates")
     }
 
     private fun checkSingleRepoForUpdate(
