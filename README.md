@@ -1,5 +1,5 @@
 1. Download APK
-2. Istall APK
+2. Install APK
 3. Create your exercises in Exercises
 4. Create your workout plans in Workout
 5. Set your goal Sets and Reps
