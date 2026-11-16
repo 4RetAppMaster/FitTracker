@@ -1,3 +1,9 @@
+Dont you hate when you wanna exercises you have to keep track your progress in a notebook, excel or a paid app?
+Now its over with FItTracker!
+You can keep your workout routine simple and effective! No paid stuff and or blocked content.
+With local storage backup you are safe from big finess corpos!
+
+
 1. Download APK
 2. Install APK
 3. Create your exercises in Exercises
